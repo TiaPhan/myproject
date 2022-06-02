@@ -1,0 +1,138 @@
+---
+title: "Hw4"
+author: "PHAN THI THU TRANG"
+date: '2022-05-24'
+output:
+  word_document: default
+  pdf_document: default
+---
+# Library
+```{r}
+library(MASS) 
+library(plyr)
+library(neuralnet)
+library(ggplot2)
+library(boot)
+```
+
+```{r}
+set.seed(500)
+data=Boston
+```
+
+# Check if there is missing data
+```{r}
+apply(data,2,function(x) sum(is.na(x)))
+```
+> No missing data
+
+# Randomly split the data into train (75%) and test (25%) data
+```{r}
+index <- sample(1:nrow(data),round(0.75*nrow(data)))
+train <- data[index,]
+test <- data[-index,]
+```
+
+# Scale and split the data.
+> Use the min-max method to normalize the data and scale the data in the interval [0,1]
+
+```{r}
+maxs <- apply(data, 2, max) 
+mins <- apply(data, 2, min)
+scaled <- as.data.frame(scale(data, center = mins, scale = maxs - mins))
+train_ <- scaled[index,]
+test_ <- scaled[-index,]
+```
+
+# Parameters
+> The input layer has 13 inputs, the two hidden layers have 5 and 3 neurons and a single output, which is medv: median value of owner-occupied homes in $1000s
+
+```{r}
+n <- names(train_)
+f <- as.formula(paste("medv ~", paste(n[!n %in% "medv"], collapse = " + ")))
+nn <- neuralnet(f,data=train_,hidden=c(5,3),linear.output=T)
+```
+
+# Plot the graphics of the fitted model.
+```{r}
+plot(nn)
+```
+
+# Predict medv using the neural network model
+```{r}
+pr.nn <- compute(nn,test_[,1:13])
+pr.nn_ <- pr.nn$net.result*(max(data$medv)-min(data$medv))+min(data$medv)
+test.r <- (test_$medv)*(max(data$medv)-min(data$medv))+min(data$medv)
+MSE.nn <- sum((test.r - pr.nn_)^2)/nrow(test_)
+```
+
+# Fit a linear model to the Boston housing price 
+```{r}
+lm.fit <- glm(medv~., data=train)
+summary(lm.fit)
+pr.lm <- predict(lm.fit,test)
+MSE.lm <- sum((pr.lm - test$medv)^2)/nrow(test)
+```
+
+# Compare the results of linear regression over its of neural network
+```{r}
+print(paste(MSE.lm,MSE.nn))
+```
+> The net is doing a better work than the linear model at predicting medv
+
+# Plot network and the linear model on the test set
+```{r}
+par(mfrow=c(1,2))
+plot(test$medv,pr.nn_,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='NN',pch=18,col='red', bty='n')
+plot(test$medv,pr.lm,col='blue',main='Real vs predicted lm',pch=18, cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='LM',pch=18,col='blue', bty='n', cex=.95)
+```
+> The predictions made by the neural network are (in general) more concetrated around the line than those made by the linear model.
+
+# Preform a 10-fold cross validation for the neural network model.
+> Here is the 10 fold cross-validated MSE for the linear model:
+
+```{r}
+library(boot)
+set.seed(200)
+lm.fit <- glm(medv~.,data=data)
+cv.glm(data,lm.fit,K=10)$delta[1]
+```
+
+# Initializing a progress bar
+```{r}
+set.seed(450)
+cv.error <- NULL
+k <- 10
+library(plyr) 
+pbar <- create_progress_bar('text')
+pbar$init(k)
+for(i in 1:k){
+    index <- sample(1:nrow(data),round(0.9*nrow(data)))
+    train.cv <- scaled[index,]
+    test.cv <- scaled[-index,]
+    nn <- neuralnet(f,data=train.cv,hidden=c(5,2),linear.output=T)   
+    pr.nn <- compute(nn,test.cv[,1:13])
+    pr.nn <- pr.nn$net.result*(max(data$medv)-min(data$medv))+min(data$medv)   
+    test.cv.r <- (test.cv$medv)*(max(data$medv)-min(data$medv))+min(data$medv)   
+    cv.error[i] <- sum((test.cv.r - pr.nn)^2)/nrow(test.cv)    
+    pbar$step()
+}
+```
+# Calculate the average MSE
+
+```{r}
+mean(cv.error)
+cv.error
+```
+
+# Plot the boxplot for the cross-validation error.
+```{r}
+boxplot(cv.error,xlab='MSE CV',col='cyan',
+        border='blue',names='CV error (MSE)',
+        main='CV error (MSE) for NN',horizontal=TRUE)
+```
+> The average MSE for the neural network (10.33) is lower than the one of the linear model although there seems to be a certain degree of variation in the MSEs of the cross validation.
